@@ -329,6 +329,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     <button class="btn-sm" id="scan-stop" onclick="stopScanner()" style="display:none;flex:1">⏹ parar</button>
   </div>
   <div class="field"><label>nome</label><input type="text" id="ex-name" placeholder="YoPro, waffle proteico..."></div>
+  <div class="field"><label>porção (g) — ajuste para calcular proporcional</label><input type="number" id="ex-porcao" placeholder="100" value="100" oninput="calcExtraPorcao()"></div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
     <div class="field"><label>kcal</label><input type="number" id="ex-kcal" placeholder="0"></div>
     <div class="field"><label>proteína (g)</label><input type="number" id="ex-prot" placeholder="0"></div>
@@ -1053,23 +1054,33 @@ function stopScanner(){
   document.getElementById('scan-stop').style.display='none';
 }
 
+let _kcal100=0,_prot100=0;
+
 async function lookupBarcode(code){
   stopScanner();
   try{
     const r=await fetch('https://world.openfoodfacts.org/api/v0/product/'+code+'.json');
     const d=await r.json();
+    document.getElementById('scan-err').style.display='none';
     if(d.status===1){
       const n=d.product,nome=n.product_name_pt||n.product_name||'Produto';
-      const kcal=Math.round(n.nutriments?.['energy-kcal_100g']||n.nutriments?.energy_100g/4.184||0);
-      const prot=Math.round((n.nutriments?.proteins_100g||0)*10)/10;
+      _kcal100=Math.round(n.nutriments?.['energy-kcal_100g']||n.nutriments?.energy_100g/4.184||0);
+      _prot100=Math.round((n.nutriments?.proteins_100g||0)*10)/10;
       document.getElementById('ex-name').value=nome;
-      document.getElementById('ex-kcal').value=kcal;
-      document.getElementById('ex-prot').value=prot;
+      const porcaoEl=document.getElementById('ex-porcao');
+      if(porcaoEl) porcaoEl.value=100;
+      calcExtraPorcao();
       const sr=document.getElementById('scan-res');sr.style.display='block';
       document.getElementById('scan-res-name').textContent=nome;
-      document.getElementById('scan-res-mac').textContent=kcal+' kcal · '+prot+'g prot por 100g';
+      document.getElementById('scan-res-mac').textContent=_kcal100+' kcal · '+_prot100+'g prot por 100g';
     } else{document.getElementById('scan-err').style.display='block';document.getElementById('scan-err').textContent='Produto não encontrado.';}
-  }catch(e){document.getElementById('scan-err').style.display='block';document.getElementById('scan-err').textContent='Erro ao buscar produto.';}
+  }catch(e){document.getElementById('scan-err').style.display='block';document.getElementById('scan-err').textContent='Erro ao buscar produto. Tente novamente.';}
+}
+
+function calcExtraPorcao(){
+  const g=parseFloat(document.getElementById('ex-porcao')?.value)||100;
+  document.getElementById('ex-kcal').value=Math.round(_kcal100*g/100);
+  document.getElementById('ex-prot').value=Math.round(_prot100*g/100*10)/10;
 }
 
 function saveExtra(){
