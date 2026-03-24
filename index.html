@@ -410,7 +410,9 @@ const CARBOS={
   // Batata inglesa cozida 52kcal/1.2g | Batata doce cozida 77kcal/0.6g
   // Mandioca cozida 125kcal/0.6g | Macarrão cozido ~157kcal/5.6g
   lucas:[
-    {n:'Arroz + feijão',g:270,k:105,p:3.5,mol:false}, // 150g arroz(192kcal)+120g feijão(91kcal)=283kcal blend
+    {n:'Arroz branco',g:150,k:128,p:2.5,mol:false},    // TACO 128kcal/100g cozido
+    {n:'Arroz integral',g:150,k:124,p:2.6,mol:false},  // TACO 124kcal/100g cozido
+    {n:'Feijão carioca',g:120,k:76,p:4.8,mol:false},   // TACO 76kcal/100g cozido
     {n:'Batata inglesa',g:200,k:52,p:1.2,mol:false},   // TACO 52kcal/100g cozida
     {n:'Batata doce',g:180,k:77,p:0.6,mol:false},      // TACO 77kcal/100g cozida
     {n:'Mandioca',g:160,k:125,p:0.6,mol:false},        // TACO 125kcal/100g cozida
@@ -419,7 +421,9 @@ const CARBOS={
     {n:'Pão sírio',g:100,k:270,p:9,mol:false},
   ],
   carla:[
-    {n:'Arroz + feijão',g:200,k:105,p:3.5,mol:false},
+    {n:'Arroz branco',g:120,k:128,p:2.5,mol:false},
+    {n:'Arroz integral',g:120,k:124,p:2.6,mol:false},
+    {n:'Feijão carioca',g:120,k:76,p:4.8,mol:false},
     {n:'Batata inglesa',g:120,k:52,p:1.2,mol:false},
     {n:'Batata doce',g:110,k:77,p:0.6,mol:false},
     {n:'Mandioca',g:100,k:125,p:0.6,mol:false},
@@ -455,7 +459,7 @@ const SHAKE_DEF={
   lucas:{k:295,p:31,por:1},   // 30g whey (122kcal) + 200ml leite semi (83kcal) + banana nanica 100g (90kcal)
   carla:{k:148,p:16,por:0.5}, // meia porção
 };
-const META={lucas:{k:2200,p:150},carla:{k:null,p:null}};
+const META={lucas:{k:2200,p:150},carla:{k:2050,p:115}};
 const MOLS_PT=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 const DAYS_PT=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 const DAYS_FULL=['domingo','segunda','terça','quarta','quinta','sexta','sábado'];
@@ -743,14 +747,17 @@ function buildMealForm(m){
   // COMER FORA
   html+=`<div id="modo-fora" style="display:${isFora?'block':'none'}">
     <div class="field"><label>descreva o que comeu</label>
-      <textarea id="fora-desc" rows="3" placeholder="Ex: prato feito com frango 150g, arroz, feijão, salada...">${m.fora_desc||''}</textarea>
+      <textarea id="fora-desc" rows="3" placeholder="Ex: frango grelhado 150g, arroz, feijão, salada...">${m.fora_desc||''}</textarea>
+    </div>
+    <div class="field"><label>porção consumida (g) — a IA estima por 100g, ajuste aqui</label>
+      <input type="number" id="fora-porcao" placeholder="100" value="${m.fora_porcao||100}" oninput="calcForaPorcao()">
     </div>
     <button class="btn btn-outline" onclick="calcWithAI()" style="margin-bottom:10px">🤖 calcular com IA</button>
     <div id="ai-load" style="display:none" class="ai-load"><div class="ai-dot"></div>Calculando...</div>
     <div id="ai-res" style="display:none" class="ai-ok">
-      <p class="ai-ok-title">Estimativa da IA</p>
+      <p class="ai-ok-title">Estimativa da IA (por 100g)</p>
       <p class="ai-ok-mac" id="ai-res-mac"></p>
-      <p class="ai-ok-note">Edite abaixo se necessário</p>
+      <p class="ai-ok-note">Ajuste a porção acima ou edite manualmente</p>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div class="field"><label>kcal</label><input type="number" id="fora-kcal" placeholder="0" value="${m.fora_k||''}"></div>
@@ -832,6 +839,16 @@ function calcModal(){
   document.getElementById('mm-total-val').textContent=Math.round(k)+' kcal · '+Math.round(pp)+'g prot';
 }
 
+let _foraKcal100=0,_foraProt100=0;
+
+function calcForaPorcao(){
+  const g=parseFloat(document.getElementById('fora-porcao')?.value)||100;
+  const fk=document.getElementById('fora-kcal');
+  const fp=document.getElementById('fora-prot');
+  if(fk&&_foraKcal100>0) fk.value=Math.round(_foraKcal100*g/100);
+  if(fp&&_foraProt100>0) fp.value=Math.round(_foraProt100*g/100*10)/10;
+}
+
 async function calcWithAI(){
   const desc=document.getElementById('fora-desc')?.value.trim();
   if(!desc) return;
@@ -839,21 +856,28 @@ async function calcWithAI(){
   document.getElementById('ai-res').style.display='none';
   try{
     const r=await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:200,
-        system:'Nutricionista. Estime calorias e proteínas. Responda SOMENTE com JSON: {"kcal":NUMBER,"prot":NUMBER,"nota":"string curta"}. Zero texto extra.',
-        messages:[{role:'user',content:'Estime: '+desc}]})
+      method:'POST',
+      headers:{'Content-Type':'application/json','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({model:'claude-sonnet-4-5-20251001',max_tokens:200,
+        system:'Você é nutricionista. Estime calorias e proteínas POR 100G do alimento descrito. Responda SOMENTE com JSON válido: {"kcal":NUMBER,"prot":NUMBER,"nota":"string curta"}. Zero texto extra, zero markdown.',
+        messages:[{role:'user',content:'Estime por 100g: '+desc}]})
     });
     const d=await r.json();
+    if(d.error) throw new Error(d.error.message);
     const txt=(d.content?.[0]?.text||'{}').replace(/```json|```/g,'').trim();
     const res=JSON.parse(txt);
-    const fk=document.getElementById('fora-kcal');
-    const fp=document.getElementById('fora-prot');
-    if(fk)fk.value=res.kcal||0;
-    if(fp)fp.value=res.prot||0;
+    _foraKcal100=res.kcal||0;
+    _foraProt100=res.prot||0;
     const ar=document.getElementById('ai-res');
-    if(ar){ar.style.display='block';document.getElementById('ai-res-mac').textContent=(res.kcal||0)+' kcal · '+(res.prot||0)+'g prot';document.querySelector('.ai-ok-note').textContent=res.nota||'Edite se necessário';}
-  }catch(e){const ar=document.getElementById('ai-res');if(ar){ar.innerHTML='<p style="font-size:13px;color:var(--off)">Erro ao calcular. Preencha manualmente.</p>';ar.style.display='block';}}
+    if(ar){
+      ar.style.display='block';
+      document.getElementById('ai-res-mac').textContent=_foraKcal100+' kcal · '+_foraProt100+'g prot por 100g';
+    }
+    calcForaPorcao();
+  }catch(e){
+    const ar=document.getElementById('ai-res');
+    if(ar){ar.innerHTML='<p style="font-size:13px;color:var(--off)">Erro: '+e.message+'</p>';ar.style.display='block';}
+  }
   document.getElementById('ai-load').style.display='none';
 }
 
@@ -931,6 +955,7 @@ function confirmMeal(){
   m.extras=mealExtraItems;
   if(foraMode){
     m.fora_desc=document.getElementById('fora-desc')?.value.trim()||'';
+    m.fora_porcao=parseFloat(document.getElementById('fora-porcao')?.value)||100;
     m.fora_k=gi('fora-kcal',0);
     m.fora_p=gf('fora-prot',0);
   } else if(m.id==='cafe'){
