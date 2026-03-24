@@ -504,7 +504,7 @@ function calcMeal(m,pr){
     });
     const sh=SHAKE_DEF[p];
     const spor=m.shake!=null?m.shake:sh.por;
-    if(spor>0){k+=Math.round(sh.k*spor*2);pp+=sh.p*spor*2;}
+    if(spor>0){k+=Math.round(sh.k*spor);pp+=sh.p*spor;}
     base={k:Math.round(k),p:+pp.toFixed(1)};
   }
   else if(m.id==='lanche'){base={k:LANCHES[p][m.op||0].k,p:LANCHES[p][m.op||0].p};}
