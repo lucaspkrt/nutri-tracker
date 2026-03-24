@@ -7,6 +7,8 @@
 <title>Nutri Tracker</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 :root{
   --bg:#f7f5f0;--surface:#fff;--surface2:#f0ede6;--border:#e2ddd4;--border2:#ccc8be;
@@ -264,7 +266,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   </div>
   <div style="padding:14px 20px 4px" id="rep-avg-box" style="display:none"></div>
   <div class="rep-content" id="rep-content"></div>
-  <div style="padding:0 20px 32px"><button class="btn btn-outline" onclick="shareReport()">📤 enviar relatório</button></div>
+  <div style="padding:0 20px 32px;display:flex;flex-direction:column;gap:8px">
+    <button class="btn btn-outline" onclick="generatePDF()">📄 gerar PDF</button>
+    <button class="btn btn-outline" onclick="shareReport()">📤 enviar via WhatsApp</button>
+  </div>
 </div>
 
 <!-- BACKUP -->
@@ -1289,6 +1294,174 @@ function renderReport(){
     }
   }
   document.getElementById('rep-content').innerHTML=html||'<p style="color:var(--text3);font-size:14px;padding:16px 20px">Nenhum dado registrado neste período.</p>';
+}
+
+async function generatePDF(){
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+  const dates=getRepDates().dates;
+  const pr=repPerson;
+  const name=pr==='lucas'?'Lucas':'Carla';
+  const color=pr==='lucas'?[45,106,79]:[155,35,53];
+  const W=210,margin=16;
+
+  // ── HEADER ──────────────────────────────────────────────────────────────────
+  doc.setFillColor(...color);
+  doc.rect(0,0,W,28,'F');
+  doc.setTextColor(255,255,255);
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(18);
+  doc.text('Nutri Tracker',margin,12);
+  doc.setFontSize(10);
+  doc.setFont('helvetica','normal');
+  doc.text(name+' · '+getRepLabel(),margin,20);
+  doc.text('Gerado em '+new Date().toLocaleDateString('pt-BR'),margin,25.5);
+
+  let y=36;
+
+  // ── COLLECT DATA ────────────────────────────────────────────────────────────
+  const days=[];
+  let totK=0,totP=0,n=0;
+  dates.forEach(date=>{
+    const d=loadDay(pr,date);
+    const t=dayTotal(d,pr);
+    if(t.k===0) return;
+    days.push({date,d,t});
+    totK+=t.k;totP+=t.p;n++;
+  });
+
+  if(days.length===0){
+    doc.setTextColor(120,120,120);
+    doc.setFontSize(12);
+    doc.text('Nenhum dado registrado neste período.',margin,y);
+    doc.save('nutri_'+pr+'_'+getRepLabel().replace(/ /g,'_')+'.pdf');
+    return;
+  }
+
+  // ── MÉDIA DESTAQUE ──────────────────────────────────────────────────────────
+  const avgK=Math.round(totK/n);
+  const avgP=Math.round(totP/n);
+  doc.setFillColor(245,250,247);
+  doc.setDrawColor(...color);
+  doc.setLineWidth(0.5);
+  doc.roundedRect(margin,y,W-margin*2,22,3,3,'FD');
+  doc.setTextColor(...color);
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(8);
+  doc.text('MÉDIA DO PERÍODO ('+n+' dia'+(n>1?'s':'')+')',margin+4,y+6);
+  doc.setFontSize(20);
+  doc.text(avgK+' kcal',margin+4,y+16);
+  doc.setFontSize(20);
+  doc.text(avgP+'g prot',W/2+4,y+16);
+  doc.setFontSize(9);
+  doc.setFont('helvetica','normal');
+  doc.setTextColor(100,100,100);
+  doc.text('calorias/dia',margin+4,y+20);
+  doc.text('proteína/dia',W/2+4,y+20);
+  y+=28;
+
+  // ── GRÁFICO (canvas offscreen) ───────────────────────────────────────────────
+  const canvas=document.createElement('canvas');
+  canvas.width=600;canvas.height=220;
+  document.body.appendChild(canvas);
+  const labels=days.map(d=>fmtShort(d.date));
+  const dataK=days.map(d=>d.t.k);
+  const dataP=days.map(d=>d.t.p);
+  const chart=new Chart(canvas,{
+    type:'bar',
+    data:{
+      labels,
+      datasets:[
+        {label:'Kcal',data:dataK,backgroundColor:'rgba('+color.join(',')+',0.8)',yAxisID:'y'},
+        {label:'Prot (g)',data:dataP,backgroundColor:'rgba('+color.join(',')+',0.3)',yAxisID:'y2'},
+      ]
+    },
+    options:{
+      animation:false,responsive:false,
+      plugins:{legend:{labels:{font:{size:11}}}},
+      scales:{
+        y:{position:'left',title:{display:true,text:'kcal'}},
+        y2:{position:'right',title:{display:true,text:'prot (g)'},grid:{drawOnChartArea:false}},
+      }
+    }
+  });
+  await new Promise(r=>setTimeout(r,200));
+  const imgData=canvas.toDataURL('image/png');
+  chart.destroy();document.body.removeChild(canvas);
+  const chartH=52;
+  doc.addImage(imgData,'PNG',margin,y,W-margin*2,chartH);
+  y+=chartH+8;
+
+  // ── DIAS ────────────────────────────────────────────────────────────────────
+  const checkPage=()=>{if(y>265){doc.addPage();y=16;}};
+
+  days.forEach(({date,d,t})=>{
+    checkPage();
+    // Day header
+    doc.setFillColor(...color.map(v=>Math.min(255,v+160)));
+    doc.rect(margin,y,W-margin*2,7,'F');
+    doc.setTextColor(...color);
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(9);
+    doc.text(fmtShort(date).toUpperCase()+(d.closed?' 🔒':''),margin+2,y+5);
+    doc.setTextColor(60,60,60);
+    doc.text(t.k+' kcal  ·  '+t.p+'g prot',W-margin-2,y+5,{align:'right'});
+    y+=9;
+
+    // Meals
+    d.meals.forEach(m=>{
+      if(!m.logged) return;
+      checkPage();
+      const mc=calcMeal(m,pr);
+      const det=getMealDetail(m,pr);
+      doc.setFont('helvetica','bold');
+      doc.setFontSize(8);
+      doc.setTextColor(40,40,40);
+      doc.text(m.name,margin+3,y+4);
+      doc.setFont('helvetica','normal');
+      doc.setTextColor(100,100,100);
+      doc.setFontSize(7);
+      if(det) doc.text(det,margin+3,y+8,{maxWidth:W-margin*2-30});
+      doc.setFont('helvetica','bold');
+      doc.setFontSize(8);
+      doc.setTextColor(...color);
+      doc.text(mc.k+'k · '+mc.p+'g',W-margin-2,y+4,{align:'right'});
+      // Extras
+      (m.extras||[]).forEach(e=>{
+        y+=5;checkPage();
+        doc.setFont('helvetica','normal');
+        doc.setFontSize(7);
+        doc.setTextColor(130,130,130);
+        doc.text('+ '+e.name,margin+6,y+4);
+        doc.text(e.k+'k · '+e.p+'g',W-margin-2,y+4,{align:'right'});
+      });
+      y+=det?12:7;
+    });
+
+    // Day extras
+    (d.extras||[]).forEach(e=>{
+      checkPage();
+      doc.setFont('helvetica','normal');
+      doc.setFontSize(7);
+      doc.setTextColor(130,130,130);
+      doc.text('+ '+e.name,margin+3,y+4);
+      doc.text(e.k+'k · '+e.p+'g',W-margin-2,y+4,{align:'right'});
+      y+=6;
+    });
+    y+=4;
+  });
+
+  // ── FOOTER ──────────────────────────────────────────────────────────────────
+  const pageCount=doc.getNumberOfPages();
+  for(let i=1;i<=pageCount;i++){
+    doc.setPage(i);
+    doc.setFontSize(7);
+    doc.setTextColor(180,180,180);
+    doc.text('Nutri Tracker · '+name+' · '+getRepLabel(),margin,292);
+    doc.text(i+'/'+pageCount,W-margin,292,{align:'right'});
+  }
+
+  doc.save('nutri_'+pr+'_'+getRepLabel().replace(/ /g,'_').replace(/–/g,'a')+'.pdf');
 }
 
 function shareReport(){
