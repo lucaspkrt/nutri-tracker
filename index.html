@@ -6,6 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Nutri Tracker</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js"></script>
 <style>
 :root{
   --bg:#f7f5f0;--surface:#fff;--surface2:#f0ede6;--border:#e2ddd4;--border2:#ccc8be;
@@ -320,7 +321,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
       <option value="day">dia (geral)</option>
     </select>
   </div>
-  <div class="scanner-wrap" id="sw" style="display:none"><video id="sv" autoplay playsinline muted></video><div class="scan-line"></div></div>
+  <div class="scanner-wrap" id="sw" style="display:none"><video id="sv" autoplay playsinline muted style="width:100%;max-height:200px;object-fit:cover"></video><canvas id="sc-canvas" style="display:none"></canvas><div class="scan-line"></div></div>
   <div class="scan-res" id="scan-res"><p id="scan-res-name" style="font-size:14px;font-weight:600;color:var(--ok)"></p><p id="scan-res-mac" style="font-size:12px;color:var(--ok);margin-top:2px"></p></div>
   <div class="scan-err" id="scan-err"></div>
   <div style="display:flex;gap:8px;margin-bottom:14px">
@@ -363,6 +364,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 </div>
 
 <script>
+// ── DATA ──────────────────────────────────────────────────────────────────────
 const FRUTAS=[
   {n:'Frutas vermelhas',g:130,k:36,p:.7},{n:'Banana',g:100,k:89,p:1.1},
   {n:'Melancia',g:150,k:25,p:.5},{n:'Maçã',g:130,k:55,p:.3},
@@ -372,16 +374,17 @@ const MOLHOS=[
   {n:'Molho vermelho',g:40,k:75,p:1.5},{n:'Molho branco',g:40,k:200,p:3},{n:'Molho cheddar',g:40,k:300,p:5},
 ];
 const PROTEINAS={
+  // Fonte: Tabela TACO (UNICAMP) — valores por 100g preparado (grelhado/cozido)
   lucas:[
-    {n:'Frango em cubos',g:160,k:159,p:32,mf:true},
-    {n:'Filé de frango',g:160,k:159,p:32,mf:false},
-    {n:'Salmão',g:160,k:243,p:26,mf:false},
-    {n:'Almôndegas',g:160,k:200,p:18,mf:false},
-    {n:'Carne moída',g:160,k:219,p:36,mf:false},
-    {n:'Filé mignon bovino',g:160,k:220,p:33,mf:false},
-    {n:'Filé mignon suíno',g:160,k:210,p:36,mf:false},
-    {n:'Filé bovino',g:160,k:219,p:36,mf:false},
-    {n:'Lagarto bovino',g:160,k:180,p:28,mf:false},
+    {n:'Frango em cubos',g:160,k:159,p:32,mf:true},   // TACO: frango peito grelhado 159kcal/32g
+    {n:'Filé de frango',g:160,k:159,p:32,mf:false},    // TACO: frango peito grelhado
+    {n:'Salmão',g:160,k:243,p:26,mf:false},            // TACO: salmão sem pele grelhado 243kcal/26.1g
+    {n:'Almôndegas',g:160,k:200,p:18,mf:false},        // estimativa — misto boi+porco
+    {n:'Carne moída',g:160,k:219,p:36,mf:false},       // TACO: patinho grelhado 219kcal/35.9g
+    {n:'Filé mignon bovino',g:160,k:220,p:33,mf:false},// TACO: filé mignon grelhado 220kcal/32.8g
+    {n:'Filé mignon suíno',g:160,k:210,p:36,mf:false}, // TACO: lombo suíno assado 210kcal/35.7g
+    {n:'Filé bovino',g:160,k:219,p:36,mf:false},       // TACO: patinho grelhado
+    {n:'Lagarto bovino',g:160,k:180,p:28,mf:false},    // TACO: lagarto cru 135 → cozido estimado
   ],
   carla:[
     {n:'Frango em cubos',g:120,k:159,p:32,mf:true},
@@ -393,17 +396,19 @@ const PROTEINAS={
     {n:'Filé mignon suíno',g:120,k:210,p:36,mf:false},
     {n:'Filé bovino',g:120,k:219,p:36,mf:false},
     {n:'Lagarto bovino',g:120,k:180,p:28,mf:false},
-    {n:'Mini hambúrgueres',g:120,k:230,p:20,mf:false},
+    {n:'Mini hambúrgueres',g:120,k:230,p:20,mf:false}, // blend acém+patinho estimado
   ]
 };
 const CARBOS={
-
+  // Tabela TACO: Arroz branco cozido 128kcal/2.5g prot | Feijão carioca cozido 76kcal/4.8g
+  // Batata inglesa cozida 52kcal/1.2g | Batata doce cozida 77kcal/0.6g
+  // Mandioca cozida 125kcal/0.6g | Macarrão cozido ~157kcal/5.6g
   lucas:[
-    {n:'Arroz + feijão',g:270,k:105,p:3.5,mol:false},
-    {n:'Batata inglesa',g:200,k:52,p:1.2,mol:false},
-    {n:'Batata doce',g:180,k:77,p:0.6,mol:false},
-    {n:'Mandioca',g:160,k:125,p:0.6,mol:false},
-    {n:'Macarrão cozido',g:250,k:157,p:5.6,mol:true},
+    {n:'Arroz + feijão',g:270,k:105,p:3.5,mol:false}, // 150g arroz(192kcal)+120g feijão(91kcal)=283kcal blend
+    {n:'Batata inglesa',g:200,k:52,p:1.2,mol:false},   // TACO 52kcal/100g cozida
+    {n:'Batata doce',g:180,k:77,p:0.6,mol:false},      // TACO 77kcal/100g cozida
+    {n:'Mandioca',g:160,k:125,p:0.6,mol:false},        // TACO 125kcal/100g cozida
+    {n:'Macarrão cozido',g:250,k:157,p:5.6,mol:true},  // ~157kcal/100g cozido
     {n:'Pão mini hambúrguer',g:110,k:300,p:8,mol:false},
     {n:'Pão sírio',g:100,k:270,p:9,mol:false},
   ],
@@ -427,19 +432,22 @@ const LANCHES={
     {n:'Sorvete caseiro (fruta+leite)',k:220,p:8},
   ]
 };
-
+// Café: proteína = ovos + whey+leite | carbo = pão | fruta
+// Café: lista de alimentos com kcal e prot por UNIDADE (porção padrão)
 const CAFE_ALIMENTOS=[
-  {n:'Ovo mexido / cozido',      k:73,  p:6.3},
-  {n:'Pão com requeijão',        k:186, p:6},
-  {n:'Pão com manteiga',         k:222, p:4},
-  {n:'Tapioca',                  k:68,  p:0.5},
-  {n:'Pão de queijo',            k:130, p:4},
-  {n:'Frutas (porção)',           k:60,  p:1},
-  {n:'Iogurte natural integral', k:61,  p:3.2},
+  // Fonte: Tabela TACO — por unidade/porção padrão
+  {n:'Ovo mexido / cozido',      k:73,  p:6.3}, // TACO ovo cozido 146kcal/100g, 1 ovo médio ~50g
+  {n:'Pão com requeijão',        k:186, p:6},   // pão francês 50g (150kcal) + requeijão light 20g (36kcal)
+  {n:'Pão com manteiga',         k:222, p:4},   // pão francês 50g (150kcal) + manteiga 10g (72kcal)
+  {n:'Tapioca',                  k:68,  p:0.5}, // tapioca hidratada 45g ~68kcal
+  {n:'Pão de queijo',            k:130, p:4},   // 3 pequenos ~45g, padaria artesanal
+  {n:'Frutas (porção)',           k:60,  p:1},   // porção genérica ~100g
+  {n:'Iogurte natural integral', k:61,  p:3.2}, // TACO 61kcal/100g
 ];
+// Shake: kcal/prot por porção inteira
 const SHAKE_DEF={
-  lucas:{k:295,p:31,por:1},
-  carla:{k:148,p:16,por:0.5},
+  lucas:{k:295,p:31,por:1},   // 30g whey (122kcal) + 200ml leite semi (83kcal) + banana nanica 100g (90kcal)
+  carla:{k:148,p:16,por:0.5}, // meia porção
 };
 const META={lucas:{k:2200,p:150},carla:{k:null,p:null}};
 const MOLS_PT=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
@@ -447,12 +455,15 @@ const DAYS_PT=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 const DAYS_FULL=['domingo','segunda','terça','quarta','quinta','sexta','sábado'];
 const MONTHS_S=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 const MOLHO_FRANGO={k:20,p:0};
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
 let CP=null,dayData={},editIdx=null,scanStream=null,curReport='semanal';
 let calYear=new Date().getFullYear(),calMonth=new Date().getMonth(),calProfile='lucas';
 let dsDate=null,dsProfile='lucas';
 let mealExtraItems=[];
-let currentShake=1;
+let currentShake=1; // items added within a meal modal
 
+// ── HELPERS ───────────────────────────────────────────────────────────────────
 function mac(item,g){return{k:Math.round(item.k*g/100),p:Math.round(item.p*g/10)/10};}
 function todayKey(){return new Date().toISOString().slice(0,10);}
 function storKey(p,d){return 'nt_'+(p||CP)+'_'+(d||todayKey());}
@@ -465,9 +476,9 @@ function loadDay(p,d){
   return{meals:[
     {id:'cafe',name:'Café da manhã',time:'06:00',logged:false,fora:false,
      itens: pr==='lucas'
-       ? [{ai:0,qt:3},{ai:1,qt:1}]
-       : [{ai:0,qt:2},{ai:1,qt:1}],
-     shake: pr==='lucas'?1:0.5,
+       ? [{ai:0,qt:3},{ai:1,qt:1}]   // 3 ovos + 1 pão c/ requeijão
+       : [{ai:0,qt:2},{ai:1,qt:1}],  // 2 ovos + 1 pão c/ requeijão
+     shake: pr==='lucas'?1:0.5,      // 1=inteira, 0.5=meia
      extras:[]},
     {id:'almoco',name:'Almoço',time:'12:00',logged:false,fora:false,
      pi:null,pg:0,ci:null,cg:0,mi:0,mg:40,tem:false,extras:[]},
@@ -504,6 +515,7 @@ function calcMeal(m,pr){
     if(m.tem&&m.mi!=null){const ml=mac({k:MOLHOS[m.mi].k,p:MOLHOS[m.mi].p},m.mg||40);k+=ml.k;pp=+(pp+ml.p).toFixed(1);}
     base={k,p:pp};
   }
+  // add meal-level extras
   const extras=m.extras||[];
   extras.forEach(e=>{base.k+=e.k;base.p=+(base.p+e.p).toFixed(1);});
   return{k:Math.round(base.k),p:+base.p.toFixed(1)};
@@ -540,6 +552,8 @@ function getMealDetail(m,pr){
 function fmtDate(d){d=d||new Date();return DAYS_FULL[d.getDay()]+', '+d.getDate()+' de '+MONTHS_S[d.getMonth()];}
 function fmtShort(str){const d=new Date(str+'T12:00:00');return DAYS_FULL[d.getDay()].slice(0,3)+' '+d.getDate()+'/'+String(d.getMonth()+1).padStart(2,'0');}
 function emoji(s){return s==='ok'?'✅':s==='off'?'❌':'⚠️';}
+
+// ── SCREENS ───────────────────────────────────────────────────────────────────
 function showScreen(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
@@ -566,6 +580,8 @@ function selectProfile(p){
   document.getElementById('sub-prot').textContent=m.p?'meta: '+m.p+'g prot':'total do dia';
   renderMeals(); showScreen('s-day');
 }
+
+// ── RENDER ────────────────────────────────────────────────────────────────────
 function renderMeals(){
   const closed=dayData.closed||false;
   document.getElementById('closed-banner').style.display=closed?'flex':'none';
@@ -612,6 +628,8 @@ function updateTotals(){
   document.getElementById('bar-kcal').style.width=m.k?Math.min(100,Math.round(t.k/m.k*100))+'%':'0%';
   document.getElementById('bar-prot').style.width=m.p?Math.min(100,Math.round(t.p/m.p*100))+'%':'0%';
 }
+
+// ── CLOSE DAY ─────────────────────────────────────────────────────────────────
 function confirmCloseDay(){
   const t=dayTotal(dayData,CP);
   const logged=dayData.meals.filter(m=>m.logged).length;
@@ -625,6 +643,8 @@ function closeDay(){
   showScreen('s-diary');
 }
 function reopenDay(){dayData.closed=false;saveDay();renderMeals();}
+
+// ── MEAL MODAL ────────────────────────────────────────────────────────────────
 function openMeal(i){
   if(dayData.closed) return;
   editIdx=i; mealExtraItems=[...(dayData.meals[i].extras||[])];
@@ -648,6 +668,8 @@ function buildMealForm(m){
     <button class="mode-btn ${!isFora?'active':''}" onclick="toggleModo(false)">📋 plano</button>
     <button class="mode-btn ${isFora?'active':''}" onclick="toggleModo(true)">🍽 comer fora</button>
   </div>`;
+
+  // PLANO
   html+=`<div id="modo-plano" style="display:${isFora?'none':'block'}">`;
   if(m.id==='cafe'){
     const itens=m.itens||[{ai:0,qt:CP==='lucas'?3:2},{ai:1,qt:1}];
@@ -711,6 +733,8 @@ function buildMealForm(m){
     </div>`;
   }
   html+=`</div>`;
+
+  // COMER FORA
   html+=`<div id="modo-fora" style="display:${isFora?'block':'none'}">
     <div class="field"><label>descreva o que comeu</label>
       <textarea id="fora-desc" rows="3" placeholder="Ex: prato feito com frango 150g, arroz, feijão, salada...">${m.fora_desc||''}</textarea>
@@ -727,6 +751,8 @@ function buildMealForm(m){
       <div class="field"><label>prot (g)</label><input type="number" id="fora-prot" placeholder="0" value="${m.fora_p||''}"></div>
     </div>
   </div>`;
+
+
 
   document.getElementById('mm-body').innerHTML=html;
   if(!isFora) setTimeout(calcModal,30);
@@ -824,6 +850,8 @@ async function calcWithAI(){
   }catch(e){const ar=document.getElementById('ai-res');if(ar){ar.innerHTML='<p style="font-size:13px;color:var(--off)">Erro ao calcular. Preencha manualmente.</p>';ar.style.display='block';}}
   document.getElementById('ai-load').style.display='none';
 }
+
+// ── MEAL EXTRA ITEMS ──────────────────────────────────────────────────────────
 function openAddMealItem(){document.getElementById('add-meal-item-box').style.display='block';}
 
 async function calcMealItemAI(){
@@ -900,6 +928,7 @@ function confirmMeal(){
     m.fora_k=gi('fora-kcal',0);
     m.fora_p=gf('fora-prot',0);
   } else if(m.id==='cafe'){
+    // read items from DOM
     const itensEl=document.getElementById('cafe-itens');
     const newItens=[];
     if(itensEl){
@@ -957,10 +986,13 @@ function setShake(por){
   });
   calcModal();
 }
+
+// ── EXTRA (day level) ─────────────────────────────────────────────────────────
 function openExtra(){
   if(dayData.closed)return;
   document.getElementById('scan-res').style.display='none';
   document.getElementById('scan-err').style.display='none';
+  // populate meal target dropdown
   const sel=document.getElementById('extra-meal-target');
   if(sel){
     sel.innerHTML='<option value="day">dia (geral)</option>';
@@ -974,23 +1006,48 @@ function openExtra(){
 }
 function closeExtraModal(){stopScanner();document.getElementById('modal-extra').classList.remove('open');}
 
+let zxingReader=null;
+
 async function startScanner(){
   document.getElementById('scan-err').style.display='none';
   document.getElementById('scan-res').style.display='none';
   try{
-    scanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
-    document.getElementById('sv').srcObject=scanStream;
+    if(typeof ZXing==='undefined'){
+      const err=document.getElementById('scan-err');
+      err.style.display='block';
+      err.textContent='Biblioteca de scanner não carregou. Verifique a conexão.';
+      return;
+    }
     document.getElementById('sw').style.display='block';
     document.getElementById('scan-btn').style.display='none';
     document.getElementById('scan-stop').style.display='block';
-    if('BarcodeDetector' in window){
-      const bd=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e']});
-      const scan=async()=>{if(!scanStream)return;try{const bc=await bd.detect(document.getElementById('sv'));if(bc.length>0){await lookupBarcode(bc[0].rawValue);return;}}catch(e){}requestAnimationFrame(scan);};
-      document.getElementById('sv').addEventListener('playing',scan,{once:true});
-    } else{const err=document.getElementById('scan-err');err.style.display='block';err.textContent='Scanner não suportado. Digite o código no nome.';}
-  }catch(e){const err=document.getElementById('scan-err');err.style.display='block';err.textContent='Sem acesso à câmera. Verifique as permissões.';}
+    const hints=new Map();
+    const fmts=[ZXing.BarcodeFormat.EAN_13,ZXing.BarcodeFormat.EAN_8,ZXing.BarcodeFormat.UPC_A,ZXing.BarcodeFormat.UPC_E,ZXing.BarcodeFormat.CODE_128];
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,fmts);
+    zxingReader=new ZXing.BrowserMultiFormatReader(hints);
+    const devices=await ZXing.BrowserCodeReader.listVideoInputDevices();
+    const camId=devices.length>1?devices[devices.length-1].deviceId:devices[0]?.deviceId;
+    await zxingReader.decodeFromVideoDevice(camId,'sv',async(result,err)=>{
+      if(result){
+        await lookupBarcode(result.getText());
+      }
+    });
+  }catch(e){
+    const err=document.getElementById('scan-err');
+    err.style.display='block';
+    err.textContent='Sem acesso à câmera. Verifique as permissões no navegador.';
+    stopScanner();
+  }
 }
-function stopScanner(){if(scanStream){scanStream.getTracks().forEach(t=>t.stop());scanStream=null;}document.getElementById('sw').style.display='none';document.getElementById('scan-btn').style.display='block';document.getElementById('scan-stop').style.display='none';}
+
+function stopScanner(){
+  if(zxingReader){try{zxingReader.reset();}catch(e){}zxingReader=null;}
+  if(scanStream){scanStream.getTracks().forEach(t=>t.stop());scanStream=null;}
+  const v=document.getElementById('sv');if(v){v.srcObject=null;}
+  document.getElementById('sw').style.display='none';
+  document.getElementById('scan-btn').style.display='block';
+  document.getElementById('scan-stop').style.display='none';
+}
 
 async function lookupBarcode(code){
   stopScanner();
@@ -1030,6 +1087,8 @@ function saveExtra(){
   saveDay();renderMeals();closeExtraModal();
 }
 function removeExtra(i){dayData.extras.splice(i,1);saveDay();renderMeals();}
+
+// ── SHARE ─────────────────────────────────────────────────────────────────────
 function shareDayWA(){
   const t=dayTotal(dayData,CP);
   const name=CP==='lucas'?'Lucas':'Carla';
@@ -1045,6 +1104,8 @@ function shareDayWA(){
   txt+=`📊 *Total: ${t.k} kcal · ${t.p}g prot*`;
   window.open('https://wa.me/?text='+encodeURIComponent(txt),'_blank');
 }
+
+// ── DIARY ─────────────────────────────────────────────────────────────────────
 function switchDiaryP(p,el){
   calProfile=p;
   document.getElementById('dtab-l').className='cal-tab'+(p==='lucas'?' al':'');
@@ -1115,6 +1176,8 @@ function renderDaySummary(){
   (data.extras||[]).forEach(e=>{html+=`<div class="sum-row"><div><p class="sum-row-name">➕ ${e.name}</p></div><p class="sum-row-mac">${e.k}k·${e.p}g</p></div>`;});
   document.getElementById('ds-body').innerHTML=html;
 }
+
+// ── REPORT ────────────────────────────────────────────────────────────────────
 let repPerson='lucas', repType='week', repOffset=0;
 
 function setRepPerson(p){
@@ -1135,7 +1198,7 @@ function getRepDates(){
   const now=new Date();
   let start,end;
   if(repType==='week'){
-    const dow=(now.getDay()||7)-1;
+    const dow=(now.getDay()||7)-1; // 0=mon
     const mon=new Date(now);mon.setDate(now.getDate()-dow+(repOffset*7));
     start=new Date(mon);
     end=new Date(mon);end.setDate(mon.getDate()+6);
@@ -1194,6 +1257,7 @@ function renderReport(){
     });
     html+=`</div></div>`;
   });
+  // avg box
   const avgBox=document.getElementById('rep-avg-box');
   if(avgBox){
     if(n>0){
@@ -1234,6 +1298,8 @@ function shareReport(){
   if(n>0) txt+=`*Média: ${Math.round(totK/n)} kcal · ${Math.round(totP/n)}g prot/dia*`;
   window.open('https://wa.me/?text='+encodeURIComponent(txt),'_blank');
 }
+
+// ── BACKUP ────────────────────────────────────────────────────────────────────
 function exportBackup(){
   const all={};
   for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k.startsWith('nt_'))all[k]=JSON.parse(localStorage.getItem(k));}
@@ -1248,6 +1314,8 @@ function importBackup(e){
   reader.readAsText(file);
 }
 function showBakMsg(msg){const el=document.getElementById('bak-msg');el.textContent=msg;el.style.display='block';setTimeout(()=>el.style.display='none',3000);}
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
 document.getElementById('lbl-today').textContent=fmtDate();
 </script>
 </body>
