@@ -1015,9 +1015,13 @@ async function startScanner(){
     if(typeof ZXing==='undefined'){
       const err=document.getElementById('scan-err');
       err.style.display='block';
-      err.textContent='Biblioteca de scanner não carregou. Verifique a conexão.';
+      err.textContent='Biblioteca não carregou. Verifique a conexão.';
       return;
     }
+    // iOS Safari: request permission explicitly first
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    stream.getTracks().forEach(t=>t.stop()); // release immediately, ZXing will reopen
+    scanStream=null;
     document.getElementById('sw').style.display='block';
     document.getElementById('scan-btn').style.display='none';
     document.getElementById('scan-stop').style.display='block';
@@ -1025,17 +1029,17 @@ async function startScanner(){
     const fmts=[ZXing.BarcodeFormat.EAN_13,ZXing.BarcodeFormat.EAN_8,ZXing.BarcodeFormat.UPC_A,ZXing.BarcodeFormat.UPC_E,ZXing.BarcodeFormat.CODE_128];
     hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,fmts);
     zxingReader=new ZXing.BrowserMultiFormatReader(hints);
-    const devices=await ZXing.BrowserCodeReader.listVideoInputDevices();
-    const camId=devices.length>1?devices[devices.length-1].deviceId:devices[0]?.deviceId;
-    await zxingReader.decodeFromVideoDevice(camId,'sv',async(result,err)=>{
-      if(result){
-        await lookupBarcode(result.getText());
+    await zxingReader.decodeFromConstraints(
+      {video:{facingMode:'environment'}},
+      'sv',
+      async(result,err2)=>{
+        if(result){await lookupBarcode(result.getText());}
       }
-    });
+    );
   }catch(e){
     const err=document.getElementById('scan-err');
     err.style.display='block';
-    err.textContent='Sem acesso à câmera. Verifique as permissões no navegador.';
+    err.textContent='Sem acesso à câmera. Toque em "aA" na barra do Safari → Câmera → Permitir.';
     stopScanner();
   }
 }
