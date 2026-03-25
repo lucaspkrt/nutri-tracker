@@ -206,6 +206,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     <div class="back-btn" onclick="goHome()">←</div>
     <div class="topbar-av" id="day-av"></div>
     <div class="topbar-info"><p class="topbar-name" id="day-name"></p><p class="topbar-date" id="day-date"></p></div>
+    <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">
+      <div class="back-btn" onclick="navDay(-1)" title="dia anterior">‹</div>
+      <div class="back-btn" id="nav-today-btn" onclick="navDayToday()" title="hoje" style="font-size:11px;font-weight:600;width:34px">hj</div>
+      <div class="back-btn" id="nav-next-btn" onclick="navDay(1)" title="próximo dia">›</div>
+    </div>
   </div>
   <div id="closed-banner" style="display:none" class="closed-banner">
     <span style="font-size:18px">🔒</span>
@@ -471,7 +476,8 @@ let CP=null,dayData={},editIdx=null,scanStream=null,curReport='semanal';
 let calYear=new Date().getFullYear(),calMonth=new Date().getMonth(),calProfile='lucas';
 let dsDate=null,dsProfile='lucas';
 let mealExtraItems=[];
-let currentShake=1; // items added within a meal modal
+let currentShake=1;
+let currentDate=null; // active date in day screen (set on selectProfile)
 
 // ── STORAGE LAYER (IndexedDB + localStorage fallback) ─────────────────────────
 const DB_NAME='nutri_tracker',DB_VER=1,STORE='days';
@@ -580,7 +586,7 @@ async function initStorage(){
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 function mac(item,g){return{k:Math.round(item.k*g/100),p:Math.round(item.p*g/10)/10};}
 function todayKey(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
-function storKey(p,d){return 'nt_'+(p||CP)+'_'+(d||todayKey());}
+function storKey(p,d){return 'nt_'+(p||CP)+'_'+(d||currentDate||todayKey());}
 function saveDay(){storSet(storKey(CP),dayData);}
 
 function loadDay(p,d){
@@ -678,13 +684,12 @@ function showScreen(id){
 function goHome(){stopScanner();showScreen('s-home');}
 
 function selectProfile(p){
-  CP=p; dayData=loadDay(p);
+  CP=p; currentDate=todayKey(); dayData=loadDay(p,currentDate);
   const isL=p==='lucas';
   const av=document.getElementById('day-av');
   av.textContent=isL?'L':'C';
   av.className='topbar-av '+(isL?'av-l':'av-c');
   document.getElementById('day-name').textContent=isL?'Lucas':'Carla';
-  document.getElementById('day-date').textContent=fmtDate();
   document.getElementById('mm-confirm').className='btn btn-'+(isL?'l':'c');
   document.getElementById('ex-btn').className='btn btn-'+(isL?'l':'c');
   document.getElementById('close-day-btn').className='btn btn-'+(isL?'l':'c');
@@ -692,7 +697,37 @@ function selectProfile(p){
   const m=META[p];
   document.getElementById('sub-kcal').textContent=m.k?'meta: '+m.k+' kcal':'total do dia';
   document.getElementById('sub-prot').textContent=m.p?'meta: '+m.p+'g prot':'total do dia';
+  updateDayNav();
   renderMeals(); showScreen('s-day');
+}
+
+function navDay(dir){
+  const d=new Date(currentDate+'T12:00:00');
+  d.setDate(d.getDate()+dir);
+  const newKey=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  // don't navigate to future beyond today
+  if(newKey>todayKey()) return;
+  currentDate=newKey;
+  dayData=loadDay(CP,currentDate);
+  updateDayNav();
+  renderMeals();
+}
+
+function navDayToday(){
+  currentDate=todayKey();
+  dayData=loadDay(CP,currentDate);
+  updateDayNav();
+  renderMeals();
+}
+
+function updateDayNav(){
+  const isToday=currentDate===todayKey();
+  const d=new Date(currentDate+'T12:00:00');
+  const label=isToday?'hoje — '+fmtDate(d):fmtDate(d);
+  document.getElementById('day-date').textContent=label;
+  // dim "hj" button when already on today; dim "›" when on today
+  document.getElementById('nav-today-btn').style.opacity=isToday?'.35':'1';
+  document.getElementById('nav-next-btn').style.opacity=isToday?'.35':'1';
 }
 
 // ── RENDER ────────────────────────────────────────────────────────────────────
@@ -753,19 +788,25 @@ function confirmCloseDay(){
 function closeDay(){
   dayData.closed=true; saveDay();
   document.getElementById('modal-confirm').classList.remove('open');
-  calProfile=CP; calYear=new Date().getFullYear(); calMonth=new Date().getMonth();
-  // Auto backup
-  try{
-    const all={};
-    Object.keys(_cache).forEach(k=>{if(k.startsWith('nt_'))all[k]=_cache[k];});
-    const blob=new Blob([JSON.stringify(all,null,2)],{type:'application/json'});
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);
-    a.download='nutri_backup_'+todayKey()+'.json';
-    a.click();
-    URL.revokeObjectURL(a.href);
-  }catch(e){console.warn('Auto backup falhou:',e);}
-  showScreen('s-diary');
+  const isToday=currentDate===todayKey();
+  if(isToday){
+    calProfile=CP; calYear=new Date().getFullYear(); calMonth=new Date().getMonth();
+    // Auto backup only when closing today
+    try{
+      const all={};
+      Object.keys(_cache).forEach(k=>{if(k.startsWith('nt_'))all[k]=_cache[k];});
+      const blob=new Blob([JSON.stringify(all,null,2)],{type:'application/json'});
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);
+      a.download='nutri_backup_'+todayKey()+'.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }catch(e){console.warn('Auto backup falhou:',e);}
+    showScreen('s-diary');
+  } else {
+    // Past day: just re-render in place
+    renderMeals();
+  }
 }
 function reopenDay(){dayData.closed=false;saveDay();renderMeals();}
 
