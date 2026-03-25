@@ -650,6 +650,17 @@ function closeDay(){
   dayData.closed=true; saveDay();
   document.getElementById('modal-confirm').classList.remove('open');
   calProfile=CP; calYear=new Date().getFullYear(); calMonth=new Date().getMonth();
+  // Auto backup
+  try{
+    const all={};
+    for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k.startsWith('nt_'))all[k]=JSON.parse(localStorage.getItem(k));}
+    const blob=new Blob([JSON.stringify(all,null,2)],{type:'application/json'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='nutri_backup_'+todayKey()+'.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }catch(e){console.warn('Auto backup falhou:',e);}
   showScreen('s-diary');
 }
 function reopenDay(){dayData.closed=false;saveDay();renderMeals();}
