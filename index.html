@@ -302,10 +302,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   <div id="meal-extras-list"></div>
   <button class="btn-sm" id="add-meal-item-btn" onclick="openAddMealItem()" style="margin-bottom:12px;width:100%;text-align:center">+ adicionar item à refeição</button>
   <div id="add-meal-item-box" style="display:none;border:1px solid var(--border);border-radius:var(--rsm);padding:12px;margin-bottom:12px">
-    <div class="field"><label>descreva o item</label><textarea id="ami-desc" rows="2" placeholder="Ex: pão de alho, brigadeiro, suco de laranja..."></textarea></div>
-    <button class="btn-sm" onclick="calcMealItemAI()" style="width:100%;text-align:center;margin-bottom:8px">🤖 calcular com IA</button>
-    <div id="ami-load" style="display:none" class="ai-load"><div class="ai-dot"></div>Calculando...</div>
-    <div id="ami-result" style="display:none" class="ai-ok"></div>
+    <div class="field"><label>nome do item</label><input type="text" id="ami-desc" placeholder="Ex: pão de alho, brigadeiro..."></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
       <div class="field"><label>kcal</label><input type="number" id="ami-kcal" placeholder="0"></div>
       <div class="field"><label>prot (g)</label><input type="number" id="ami-prot" placeholder="0"></div>
@@ -316,6 +313,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     </div>
   </div>
   <button class="btn" id="mm-confirm" onclick="confirmMeal()" style="margin-top:4px">salvar</button>
+  <button class="btn btn-danger" id="mm-unlog" onclick="unlogMeal()" style="margin-top:8px;display:none">🗑 remover esta refeição</button>
   <button class="btn btn-outline" onclick="closeMealModal()" style="margin-top:8px">cancelar</button>
 </div>
 </div>
@@ -439,6 +437,7 @@ const CARBOS={
 };
 const LANCHES={
   lucas:[
+    {n:'Whey + iogurte + geleia',k:120,p:11},
     {n:'Iogurte grego zero + geleia 30g',k:190,p:16},{n:'Overnight oats (iogurte+aveia+fruta)',k:280,p:14},
     {n:'Sorvete caseiro (fruta+leite)',k:220,p:8},
   ],
@@ -626,7 +625,7 @@ function calcMeal(m,pr){
     if(spor>0){k+=Math.round(sh.k*spor);pp+=sh.p*spor;}
     base={k:Math.round(k),p:+pp.toFixed(1)};
   }
-  else if(m.id==='lanche'){base={k:LANCHES[p][m.op||0].k,p:LANCHES[p][m.op||0].p};}
+  else if(m.id==='lanche'){base=m.op!=null?{k:LANCHES[p][m.op].k,p:LANCHES[p][m.op].p}:{k:0,p:0};}
   else if(m.id==='almoco'||m.id==='jantar'){
     let k=0,pp=0;
     if(m.pi!=null){const pt=mac({k:PROTEINAS[p][m.pi].k,p:PROTEINAS[p][m.pi].p},m.pg||PROTEINAS[p][0].g);k+=pt.k;pp+=pt.p;if(PROTEINAS[p][m.pi].mf)k+=MOLHO_FRANGO.k;}
@@ -658,7 +657,7 @@ function getMealDetail(m,pr){
     if(spor>0) parts.push('shake '+(spor===1?'completo':'meia porção'));
     return parts.join(' · ');
   }
-  if(m.id==='lanche') return LANCHES[p][m.op||0].n;
+  if(m.id==='lanche') return m.op!=null?LANCHES[p][m.op].n:'nenhum';
   if(m.id==='almoco'||m.id==='jantar'){
     const parts=[];
     if(m.pi!=null) parts.push(PROTEINAS[p][m.pi].n+' '+m.pg+'g');
@@ -821,8 +820,9 @@ function openMeal(i){
   document.getElementById('mm-comp').style.display='none';
   document.getElementById('mm-total').style.display='none';
   document.getElementById('add-meal-item-box').style.display='none';
-  document.getElementById('ami-result').style.display='none';
-  document.getElementById('ami-load').style.display='none';
+  // show unlog button only if meal was already logged
+  const unlogBtn=document.getElementById('mm-unlog');
+  if(unlogBtn) unlogBtn.style.display=m.logged?'block':'none';
   buildMealForm(m);
   renderMealExtraItems();
   document.getElementById('modal-meal').classList.add('open');
@@ -862,8 +862,12 @@ function buildMealForm(m){
       <p style="font-size:11px;color:var(--text3);margin-top:6px">padrão: ${shDef.por===1?'porção inteira':'meia porção'}</p>
     </div>`;
   } else if(m.id==='lanche'){
+    const sel=m.op!=null?m.op:-1; // -1 = nenhum
     html+=`<div class="field"><label>opção</label>
-      <select id="sl" onchange="calcModal()">${LANCHES[CP].map((l,j)=>`<option value="${j}" ${(m.op||0)===j?'selected':''}>${l.n}</option>`).join('')}</select>
+      <select id="sl" onchange="calcModal()">
+        <option value="-1" ${sel===-1?'selected':''}>— nenhum —</option>
+        ${LANCHES[CP].map((l,j)=>`<option value="${j}" ${sel===j?'selected':''}>${l.n}</option>`).join('')}
+      </select>
     </div>`;
   } else {
     const pi=m.pi;const ci=m.ci;
@@ -970,7 +974,8 @@ function calcModal(){
     if(currentShake>0){k+=Math.round(sh.k*currentShake);pp+=+(sh.p*currentShake).toFixed(1);}
 
   } else if(m.id==='lanche'){
-    const op=LANCHES[CP][gi('sl',0)];k=op.k;pp=op.p;
+    const opIdx=gi('sl',-1);
+    if(opIdx>=0){const op=LANCHES[CP][opIdx];k=op.k;pp=op.p;}
   } else {
     const spv=document.getElementById('sp')?.value;
     const scv=document.getElementById('sc')?.value;
@@ -1040,31 +1045,6 @@ async function calcWithAI(){
 // ── MEAL EXTRA ITEMS ──────────────────────────────────────────────────────────
 function openAddMealItem(){document.getElementById('add-meal-item-box').style.display='block';}
 
-async function calcMealItemAI(){
-  const desc=document.getElementById('ami-desc')?.value.trim();
-  if(!desc) return;
-  document.getElementById('ami-load').style.display='flex';
-  document.getElementById('ami-result').style.display='none';
-  try{
-    const r=await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:200,
-        system:'Nutricionista. Estime calorias e proteínas. Responda SOMENTE com JSON: {"kcal":NUMBER,"prot":NUMBER,"nota":"string curta"}. Zero texto extra.',
-        messages:[{role:'user',content:'Estime: '+desc}]})
-    });
-    const d=await r.json();
-    const txt=(d.content?.[0]?.text||'{}').replace(/```json|```/g,'').trim();
-    const res=JSON.parse(txt);
-    const ak=document.getElementById('ami-kcal');
-    const ap=document.getElementById('ami-prot');
-    if(ak)ak.value=res.kcal||0;
-    if(ap)ap.value=res.prot||0;
-    const ar=document.getElementById('ami-result');
-    if(ar){ar.style.display='block';ar.innerHTML=`<p class="ai-ok-title">Estimativa</p><p class="ai-ok-mac">${res.kcal||0} kcal · ${res.prot||0}g prot</p><p class="ai-ok-note">${res.nota||''}</p>`;}
-  }catch(e){const ar=document.getElementById('ami-result');if(ar){ar.innerHTML='<p style="font-size:13px;color:var(--off)">Erro. Preencha manualmente.</p>';ar.style.display='block';}}
-  document.getElementById('ami-load').style.display='none';
-}
-
 function addMealItem(){
   const name=document.getElementById('ami-desc')?.value.trim();
   if(!name) return;
@@ -1073,7 +1053,6 @@ function addMealItem(){
   document.getElementById('ami-desc').value='';
   document.getElementById('ami-kcal').value='';
   document.getElementById('ami-prot').value='';
-  document.getElementById('ami-result').style.display='none';
   document.getElementById('add-meal-item-box').style.display='none';
   renderMealExtraItems();
   calcModal();
@@ -1128,7 +1107,8 @@ function confirmMeal(){
     m.itens=newItens;
     m.shake=currentShake;
   } else if(m.id==='lanche'){
-    m.op=gi('sl',0);
+    const opIdx=gi('sl',-1);
+    m.op=opIdx>=0?opIdx:null;
   } else {
     const _spv=document.getElementById('sp')?.value;
     const _scv=document.getElementById('sc')?.value;
@@ -1143,6 +1123,16 @@ function confirmMeal(){
   saveDay(); renderMeals(); closeMealModal();
 }
 function closeMealModal(){document.getElementById('modal-meal').classList.remove('open');}
+
+function unlogMeal(){
+  const m=dayData.meals[editIdx];
+  m.logged=false; m.fora=false; m.extras=[];
+  // reset meal-specific fields
+  if(m.id==='cafe'){m.itens=CP==='lucas'?[{ai:0,qt:3},{ai:1,qt:1}]:[{ai:0,qt:2},{ai:1,qt:1}];m.shake=SHAKE_DEF[CP].por;}
+  else if(m.id==='lanche'){m.op=null;}
+  else{m.pi=null;m.pg=0;m.ci=null;m.cg=0;m.tem=false;}
+  saveDay(); renderMeals(); closeMealModal();
+}
 
 function addCafeItem(){
   const container=document.getElementById('cafe-itens');
