@@ -473,15 +473,119 @@ let dsDate=null,dsProfile='lucas';
 let mealExtraItems=[];
 let currentShake=1; // items added within a meal modal
 
+// ── STORAGE LAYER (IndexedDB + localStorage fallback) ─────────────────────────
+const DB_NAME='nutri_tracker',DB_VER=1,STORE='days';
+let _db=null;
+const _cache={}; // in-memory mirror for sync reads
+
+function _openDB(){
+  return new Promise((res,rej)=>{
+    const req=indexedDB.open(DB_NAME,DB_VER);
+    req.onupgradeneeded=e=>{
+      const db=e.target.result;
+      if(!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+    };
+    req.onsuccess=e=>{_db=e.target.result;res(_db);};
+    req.onerror=e=>{console.warn('IDB open error',e);rej(e);};
+  });
+}
+
+function _idbSet(key,val){
+  return new Promise(res=>{
+    if(!_db){res();return;}
+    try{
+      const tx=_db.transaction(STORE,'readwrite');
+      tx.objectStore(STORE).put(val,key);
+      tx.oncomplete=()=>res();
+      tx.onerror=()=>res();
+    }catch(e){res();}
+  });
+}
+
+function _idbGet(key){
+  return new Promise(res=>{
+    if(!_db){res(null);return;}
+    try{
+      const tx=_db.transaction(STORE,'readonly');
+      const req=tx.objectStore(STORE).get(key);
+      req.onsuccess=()=>res(req.result??null);
+      req.onerror=()=>res(null);
+    }catch(e){res(null);}
+  });
+}
+
+function _idbGetAll(){
+  return new Promise(res=>{
+    if(!_db){res({});return;}
+    try{
+      const all={};
+      const tx=_db.transaction(STORE,'readonly');
+      const req=tx.objectStore(STORE).openCursor();
+      req.onsuccess=e=>{
+        const cursor=e.target.result;
+        if(cursor){all[cursor.key]=cursor.value;cursor.continue();}
+        else res(all);
+      };
+      req.onerror=()=>res({});
+    }catch(e){res({});}
+  });
+}
+
+function _idbDel(key){
+  return new Promise(res=>{
+    if(!_db){res();return;}
+    try{
+      const tx=_db.transaction(STORE,'readwrite');
+      tx.objectStore(STORE).delete(key);
+      tx.oncomplete=()=>res();
+      tx.onerror=()=>res();
+    }catch(e){res();}
+  });
+}
+
+// Unified set: writes to cache, IDB, and localStorage mirror
+function storSet(key,val){
+  _cache[key]=val;
+  // fire-and-forget IDB write
+  _idbSet(key,val).catch(()=>{});
+  // localStorage mirror (best-effort)
+  try{localStorage.setItem(key,JSON.stringify(val));}catch(e){}
+}
+
+// Unified get: reads from cache (already loaded at init)
+function storGet(key){
+  if(_cache[key]!==undefined) return _cache[key];
+  // fallback: try localStorage synchronously
+  try{const s=localStorage.getItem(key);if(s)return JSON.parse(s);}catch(e){}
+  return null;
+}
+
+// Load ALL nt_ keys from IDB + localStorage into _cache at startup
+async function initStorage(){
+  try{await _openDB();}catch(e){console.warn('IDB unavailable, using localStorage only');}
+  // Load from IDB
+  const idbData=await _idbGetAll();
+  Object.keys(idbData).forEach(k=>{if(k.startsWith('nt_'))_cache[k]=idbData[k];});
+  // Merge localStorage (may have keys IDB doesn't, or be newer on first migration)
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const k=localStorage.key(i);
+      if(k&&k.startsWith('nt_')&&_cache[k]===undefined){
+        try{const v=JSON.parse(localStorage.getItem(k));_cache[k]=v;_idbSet(k,v);}catch(e){}
+      }
+    }
+  }catch(e){}
+}
+
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 function mac(item,g){return{k:Math.round(item.k*g/100),p:Math.round(item.p*g/10)/10};}
-function todayKey(){return new Date().toISOString().slice(0,10);}
+function todayKey(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function storKey(p,d){return 'nt_'+(p||CP)+'_'+(d||todayKey());}
-function saveDay(){localStorage.setItem(storKey(CP),JSON.stringify(dayData));}
+function saveDay(){storSet(storKey(CP),dayData);}
 
 function loadDay(p,d){
-  const s=localStorage.getItem('nt_'+(p||CP)+'_'+(d||todayKey()));
-  if(s) return JSON.parse(s);
+  const s=storGet('nt_'+(p||CP)+'_'+(d||todayKey()));
+  if(s) return s;
   const pr=p||CP;
   return{meals:[
     {id:'cafe',name:'Café da manhã',time:'06:00',logged:false,fora:false,
@@ -653,7 +757,7 @@ function closeDay(){
   // Auto backup
   try{
     const all={};
-    for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k.startsWith('nt_'))all[k]=JSON.parse(localStorage.getItem(k));}
+    Object.keys(_cache).forEach(k=>{if(k.startsWith('nt_'))all[k]=_cache[k];});
     const blob=new Blob([JSON.stringify(all,null,2)],{type:'application/json'});
     const a=document.createElement('a');
     a.href=URL.createObjectURL(blob);
@@ -1526,7 +1630,9 @@ function shareReport(){
 // ── BACKUP ────────────────────────────────────────────────────────────────────
 function exportBackup(){
   const all={};
-  for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k.startsWith('nt_'))all[k]=JSON.parse(localStorage.getItem(k));}
+  Object.keys(_cache).forEach(k=>{if(k.startsWith('nt_'))all[k]=_cache[k];});
+  // also sweep localStorage for anything not in cache
+  try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.startsWith('nt_')&&!all[k]){try{all[k]=JSON.parse(localStorage.getItem(k));}catch(e){}}}}catch(e){}
   const blob=new Blob([JSON.stringify(all,null,2)],{type:'application/json'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='nutri_backup_'+todayKey()+'.json';a.click();
   showBakMsg('Backup exportado!');
@@ -1534,13 +1640,18 @@ function exportBackup(){
 function importBackup(e){
   const file=e.target.files[0];if(!file)return;
   const reader=new FileReader();
-  reader.onload=ev=>{try{const d=JSON.parse(ev.target.result);Object.keys(d).forEach(k=>{if(k.startsWith('nt_'))localStorage.setItem(k,JSON.stringify(d[k]));});showBakMsg('Restaurado! '+Object.keys(d).length+' registros.');}catch{showBakMsg('Erro ao importar.');}};
+  reader.onload=ev=>{try{const d=JSON.parse(ev.target.result);Object.keys(d).forEach(k=>{if(k.startsWith('nt_'))storSet(k,d[k]);});showBakMsg('Restaurado! '+Object.keys(d).length+' registros.');}catch{showBakMsg('Erro ao importar.');}};
   reader.readAsText(file);
 }
 function showBakMsg(msg){const el=document.getElementById('bak-msg');el.textContent=msg;el.style.display='block';setTimeout(()=>el.style.display='none',3000);}
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
 document.getElementById('lbl-today').textContent=fmtDate();
+initStorage().then(()=>{
+  // After storage is ready, nothing else needed — selectProfile() will call loadDay()
+  // which now reads from the populated _cache.
+  console.log('Storage ready. Cache keys:',Object.keys(_cache).length);
+}).catch(e=>console.warn('Storage init error:',e));
 </script>
 </body>
 </html>
