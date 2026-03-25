@@ -197,6 +197,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     <button class="btn btn-outline" onclick="showScreen('s-diary')">📅 diário</button>
     <button class="btn btn-outline" onclick="showScreen('s-report')">📊 relatórios</button>
     <button class="btn btn-ghost" onclick="showScreen('s-backup')">💾 backup</button>
+    <button class="btn btn-ghost" onclick="openSettings()">⚙️ configurações</button>
   </div>
 </div>
 
@@ -288,6 +289,38 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     <div class="bak-row"><div><p class="bak-title">Importar</p><p class="bak-sub">Restaurar de arquivo JSON</p></div><button class="btn-sm" onclick="document.getElementById('imp-file').click()">importar</button></div>
     <input type="file" id="imp-file" accept=".json" style="display:none" onchange="importBackup(event)">
     <div id="bak-msg" style="margin-top:12px;font-size:13px;color:var(--ok);display:none"></div>
+  </div>
+</div>
+
+<!-- SETTINGS -->
+<div id="s-settings" class="screen">
+  <div class="topbar">
+    <div class="back-btn" onclick="goHome()">←</div>
+    <div class="topbar-info" style="margin-left:4px"><p class="topbar-name">Configurações</p><p class="topbar-date">metas nutricionais</p></div>
+  </div>
+  <div style="padding:20px">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px;margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <div class="av-lg av-l" style="width:36px;height:36px;font-size:15px;margin:0">L</div>
+        <p style="font-size:15px;font-weight:600">Lucas</p>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="field"><label>meta kcal</label><input type="number" id="cfg-lk" placeholder="2300"></div>
+        <div class="field"><label>meta prot (g)</label><input type="number" id="cfg-lp" placeholder="167"></div>
+      </div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px;margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <div class="av-lg av-c" style="width:36px;height:36px;font-size:15px;margin:0">C</div>
+        <p style="font-size:15px;font-weight:600">Carla</p>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="field"><label>meta kcal</label><input type="number" id="cfg-ck" placeholder="2050"></div>
+        <div class="field"><label>meta prot (g)</label><input type="number" id="cfg-cp" placeholder="115"></div>
+      </div>
+    </div>
+    <button class="btn btn-outline" onclick="saveSettings()" style="margin-bottom:8px">💾 salvar metas</button>
+    <div id="cfg-msg" style="font-size:13px;color:var(--ok);display:none;margin-top:8px;text-align:center"></div>
   </div>
 </div>
 
@@ -463,7 +496,8 @@ const SHAKE_DEF={
   lucas:{k:295,p:31,por:1},   // 30g whey (122kcal) + 200ml leite semi (83kcal) + banana nanica 100g (90kcal)
   carla:{k:148,p:16,por:0.5}, // meia porção
 };
-const META={lucas:{k:2200,p:150},carla:{k:2050,p:115}};
+const META_DEFAULT={lucas:{k:2300,p:167},carla:{k:2050,p:115}};
+let META={lucas:{k:2300,p:167},carla:{k:2050,p:115}};
 const MOLS_PT=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 const DAYS_PT=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 const DAYS_FULL=['domingo','segunda','terça','quarta','quinta','sexta','sábado'];
@@ -681,6 +715,29 @@ function showScreen(id){
   if(id==='s-diary') renderCalendar();
 }
 function goHome(){stopScanner();showScreen('s-home');}
+
+function openSettings(){
+  document.getElementById('cfg-lk').value=META.lucas.k;
+  document.getElementById('cfg-lp').value=META.lucas.p;
+  document.getElementById('cfg-ck').value=META.carla.k;
+  document.getElementById('cfg-cp').value=META.carla.p;
+  document.getElementById('cfg-msg').style.display='none';
+  showScreen('s-settings');
+}
+
+function saveSettings(){
+  const lk=parseInt(document.getElementById('cfg-lk').value)||META_DEFAULT.lucas.k;
+  const lp=parseInt(document.getElementById('cfg-lp').value)||META_DEFAULT.lucas.p;
+  const ck=parseInt(document.getElementById('cfg-ck').value)||META_DEFAULT.carla.k;
+  const cp=parseInt(document.getElementById('cfg-cp').value)||META_DEFAULT.carla.p;
+  META.lucas={k:lk,p:lp};
+  META.carla={k:ck,p:cp};
+  storSet('nt_config_meta',{lucas:META.lucas,carla:META.carla});
+  const msg=document.getElementById('cfg-msg');
+  msg.textContent='Metas salvas! ✓';
+  msg.style.display='block';
+  setTimeout(()=>msg.style.display='none',2500);
+}
 
 function selectProfile(p){
   CP=p; currentDate=todayKey(); dayData=loadDay(p,currentDate);
@@ -1679,8 +1736,9 @@ function showBakMsg(msg){const el=document.getElementById('bak-msg');el.textCont
 // ── INIT ──────────────────────────────────────────────────────────────────────
 document.getElementById('lbl-today').textContent=fmtDate();
 initStorage().then(()=>{
-  // After storage is ready, nothing else needed — selectProfile() will call loadDay()
-  // which now reads from the populated _cache.
+  // Load saved META if exists
+  const savedMeta=storGet('nt_config_meta');
+  if(savedMeta){META.lucas=savedMeta.lucas||META.lucas;META.carla=savedMeta.carla||META.carla;}
   console.log('Storage ready. Cache keys:',Object.keys(_cache).length);
 }).catch(e=>console.warn('Storage init error:',e));
 </script>
